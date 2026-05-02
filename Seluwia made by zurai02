@@ -1,11 +1,16 @@
-local Rayfield = loadstring(game:HttpGet('https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua'))()
+local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua"))()
 local MarketplaceService = game:GetService("MarketplaceService")
+local TweenService       = game:GetService("TweenService")
+local UserInputService   = game:GetService("UserInputService")
 local Players            = game:GetService("Players")
 local player             = Players.LocalPlayer
+local playerGui          = player:WaitForChild("PlayerGui")
 
 -- ─── EDIT SECTION ────────────────────────────────────────────────────
-local AUTO_SPEED_DEFAULT = 100  -- signals per second (1–500)
-local SPAM_INTERVAL      = 0.1  -- seconds between spam fires
+local AUTO_SPEED_DEFAULT = 100   -- signals per second
+local SPAM_INTERVAL      = 0.1   -- seconds between spam fires
+local ENTRY_HEIGHT       = 48
+local MAX_ENTRIES        = 50    -- oldest entries removed after this
 -- ─────────────────────────────────────────────────────────────────────
 
 local THEME = {
@@ -42,7 +47,7 @@ local THEME = {
 local Window = Rayfield:CreateWindow({
     Name                = "SELUWIA",
     LoadingTitle        = "SELUWIA",
-    LoadingSubtitle     = "marketplace event monitor",
+    LoadingSubtitle     = "by zurai02",
     Icon                = 0,
     Theme               = THEME,
     ConfigurationSaving = { Enabled = false },
@@ -55,56 +60,103 @@ local SettingsTab = Window:CreateTab("Settings", 4483345998)
 
 -- ─── CREDITS ─────────────────────────────────────────────────────────
 task.defer(function()
-    local pgui = player:WaitForChild("PlayerGui")
-    local gui  = pgui:WaitForChild("Rayfield", 10)
+    local gui = playerGui:WaitForChild("Rayfield", 10)
     if not gui then return end
-    local credit = Instance.new("TextLabel")
-    credit.Name                   = "SeluwiaCredit"
-    credit.Size                   = UDim2.new(0, 120, 0, 20)
-    credit.Position               = UDim2.new(1, -8, 1, -8)
-    credit.AnchorPoint            = Vector2.new(1, 1)
+    local credit          = Instance.new("TextLabel")
+    credit.Size           = UDim2.new(0, 120, 0, 20)
+    credit.Position       = UDim2.new(1, -8, 1, -8)
+    credit.AnchorPoint    = Vector2.new(1, 1)
     credit.BackgroundTransparency = 1
-    credit.Text                   = "by zurai02"
-    credit.TextColor3             = Color3.fromRGB(65, 61, 95)
-    credit.TextSize               = 11
-    credit.Font                   = Enum.Font.Gotham
-    credit.TextXAlignment         = Enum.TextXAlignment.Right
-    credit.ZIndex                 = 9999
-    credit.Parent                 = gui
+    credit.Text           = "by zurai02"
+    credit.TextColor3     = Color3.fromRGB(65, 61, 95)
+    credit.TextSize       = 11
+    credit.Font           = Enum.Font.Gotham
+    credit.TextXAlignment = Enum.TextXAlignment.Right
+    credit.ZIndex         = 9999
+    credit.Parent         = gui
 end)
+
+-- ─── CUSTOM EVENT LOG INSIDE EVENTS TAB ──────────────────────────────
+-- Rayfield exposes the tab frame via Tab.TabFrame (internal)
+-- We wait for it then inject a ScrollingFrame directly
+local logFrame    = nil
+local logLayout   = nil
+local emptyLabel  = nil
+local entries     = {}
+local eventCount  = 0
+
+local function buildLogFrame()
+    -- find the Rayfield tab content frame
+    task.defer(function()
+        local rayfieldGui = playerGui:WaitForChild("Rayfield", 10)
+        if not rayfieldGui then return end
+
+        -- walk to find the scrolling content container Rayfield uses
+        local tabContent = nil
+        for _, v in ipairs(rayfieldGui:GetDescendants()) do
+            if v:IsA("ScrollingFrame") and v.Name == "Elements" then
+                tabContent = v
+                break
+            end
+        end
+        if not tabContent then return end
+
+        logFrame = Instance.new("ScrollingFrame")
+        logFrame.Name                = "SeluwiaLog"
+        logFrame.Size                = UDim2.new(1, -8, 0, 340)
+        logFrame.BackgroundColor3    = Color3.fromRGB(12, 12, 17)
+        logFrame.BorderSizePixel     = 0
+        logFrame.ScrollBarThickness  = 3
+        logFrame.ScrollBarImageColor3 = Color3.fromRGB(61, 255, 160)
+        logFrame.CanvasSize          = UDim2.new(0, 0, 0, 0)
+        logFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        logFrame.ZIndex              = 5
+        logFrame.Parent              = tabContent
+
+        local corner = Instance.new("UICorner", logFrame)
+        corner.CornerRadius = UDim.new(0, 8)
+
+        local stroke = Instance.new("UIStroke", logFrame)
+        stroke.Color     = Color3.fromRGB(36, 34, 54)
+        stroke.Thickness = 1
+
+        logLayout = Instance.new("UIListLayout", logFrame)
+        logLayout.SortOrder        = Enum.SortOrder.LayoutOrder
+        logLayout.Padding          = UDim.new(0, 4)
+        logLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+        local pad = Instance.new("UIPadding", logFrame)
+        pad.PaddingTop    = UDim.new(0, 6)
+        pad.PaddingBottom = UDim.new(0, 6)
+        pad.PaddingLeft   = UDim.new(0, 6)
+        pad.PaddingRight  = UDim.new(0, 6)
+
+        emptyLabel = Instance.new("TextLabel")
+        emptyLabel.Name               = "Empty"
+        emptyLabel.Size               = UDim2.new(1, 0, 0, 60)
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.Text               = "waiting for events..."
+        emptyLabel.TextColor3         = Color3.fromRGB(80, 76, 110)
+        emptyLabel.TextSize           = 12
+        emptyLabel.Font               = Enum.Font.Gotham
+        emptyLabel.LayoutOrder        = 99999
+        emptyLabel.Parent             = logFrame
+    end)
+end
+
+buildLogFrame()
 
 -- ─── STATE ───────────────────────────────────────────────────────────
 local autoSpeed       = AUTO_SPEED_DEFAULT
 local suppressCounter = 0
-local eventCount      = 0
 local activeAuto      = {}  -- [entryId] = stopFn
 local activeSpam      = {}  -- [entryId] = stopFn
 
-local function activeLoopCount()
+local function activeCount()
     local n = 0
     for _ in pairs(activeAuto) do n += 1 end
     for _ in pairs(activeSpam) do n += 1 end
     return n
-end
-
--- ─── STATUS LABELS (Settings tab, rebuilt on change) ─────────────────
-local statusLabel    = nil
-local loopCountLabel = nil
-
-local function refreshStatus()
-    if statusLabel then statusLabel:Destroy() statusLabel = nil end
-    if loopCountLabel then loopCountLabel:Destroy() loopCountLabel = nil end
-
-    local eventText = eventCount == 0
-        and "no events captured yet"
-        or (eventCount .. (eventCount == 1 and " event captured" or " events captured"))
-    statusLabel = SettingsTab:CreateLabel(eventText)
-
-    local loops = activeLoopCount()
-    local loopText = loops == 0
-        and "no active loops"
-        or (loops .. (loops == 1 and " loop running" or " loops running"))
-    loopCountLabel = SettingsTab:CreateLabel(loopText)
 end
 
 -- ─── HELPERS ─────────────────────────────────────────────────────────
@@ -133,130 +185,236 @@ local function fireFakeSignal(signalType, id)
     suppressCounter -= 1
 end
 
-local function stopAll()
-    local n = activeLoopCount()
-    if n == 0 then notify("no loops running") return end
+local function makeBtn(parent, text, xPos, width, order)
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, width, 0, 28)
+    btn.Position         = UDim2.new(0, xPos, 0.5, -14)
+    btn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+    btn.Text             = text
+    btn.TextColor3       = Color3.fromRGB(170, 165, 220)
+    btn.TextSize         = 11
+    btn.Font             = Enum.Font.GothamBold
+    btn.BorderSizePixel  = 0
+    btn.ZIndex           = 6
+    btn.Parent           = parent
 
-    local autoCopy = {} for id, fn in pairs(activeAuto) do autoCopy[id] = fn end
-    for _, fn in pairs(autoCopy) do fn() end
+    local c = Instance.new("UICorner", btn)
+    c.CornerRadius = UDim.new(0, 6)
+    local s = Instance.new("UIStroke", btn)
+    s.Color     = Color3.fromRGB(44, 42, 64)
+    s.Thickness = 1
 
-    local spamCopy = {} for id, fn in pairs(activeSpam) do spamCopy[id] = fn end
-    for _, fn in pairs(spamCopy) do fn() end
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(22, 20, 34)
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+    end)
 
-    refreshStatus()
-    notify(n .. (n == 1 and " loop killed" or " loops killed"))
+    return btn
 end
 
--- ─── EVENTS TAB SETUP ────────────────────────────────────────────────
-EventsTab:CreateSection("live feed")
-EventsTab:CreateLabel("no events yet — waiting...")
+local function stopAll()
+    local n = activeCount()
+    if n == 0 then notify("no loops running") return end
+    local ac = {} for id, fn in pairs(activeAuto) do ac[id] = fn end
+    for _, fn in pairs(ac) do fn() end
+    local sc = {} for id, fn in pairs(activeSpam) do sc[id] = fn end
+    for _, fn in pairs(sc) do fn() end
+    notify(n .. " loop" .. (n == 1 and "" or "s") .. " stopped")
+end
 
--- ─── ADD LOG ─────────────────────────────────────────────────────────
+-- ─── ADD LOG ENTRY ───────────────────────────────────────────────────
 local function addLog(label, id, signalType)
     if suppressCounter > 0 then return end
+    if not logFrame then return end
+
+    -- remove empty label
+    if emptyLabel and emptyLabel.Parent then
+        emptyLabel:Destroy()
+        emptyLabel = nil
+    end
 
     eventCount += 1
-    refreshStatus()
-
     local entryId = eventCount
     local idStr   = tostring(id)
-    local tag     = label .. " · " .. idStr
 
-    EventsTab:CreateSection(tag)
+    -- trim oldest if over limit
+    if #entries >= MAX_ENTRIES then
+        local oldest = table.remove(entries, 1)
+        if oldest and oldest.frame and oldest.frame.Parent then
+            oldest.frame:Destroy()
+        end
+        if oldest.stopAuto then oldest.stopAuto() end
+        if oldest.stopSpam then oldest.stopSpam() end
+    end
+
+    local entry = Instance.new("Frame")
+    entry.Name            = "Entry_" .. entryId
+    entry.Size            = UDim2.new(1, 0, 0, ENTRY_HEIGHT)
+    entry.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+    entry.BorderSizePixel = 0
+    entry.LayoutOrder     = entryId
+    entry.BackgroundTransparency = 1
+    entry.ZIndex          = 6
+    entry.Parent          = logFrame
+
+    local ec = Instance.new("UICorner", entry)
+    ec.CornerRadius = UDim.new(0, 7)
+    local es = Instance.new("UIStroke", entry)
+    es.Color     = Color3.fromRGB(36, 34, 54)
+    es.Thickness = 1
+
+    TweenService:Create(entry, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
+
+    -- dot
+    local dot = Instance.new("Frame")
+    dot.Size             = UDim2.new(0, 7, 0, 7)
+    dot.Position         = UDim2.new(0, 10, 0.5, -3)
+    dot.BackgroundColor3 = Color3.fromRGB(61, 255, 160)
+    dot.BorderSizePixel  = 0
+    dot.ZIndex           = 7
+    dot.Parent           = entry
+    local dc = Instance.new("UICorner", dot) dc.CornerRadius = UDim.new(1, 0)
+
+    -- type label
+    local typeLbl = Instance.new("TextLabel")
+    typeLbl.Size             = UDim2.new(0, 70, 1, 0)
+    typeLbl.Position         = UDim2.new(0, 22, 0, 0)
+    typeLbl.BackgroundTransparency = 1
+    typeLbl.Text             = label:upper()
+    typeLbl.TextColor3       = Color3.fromRGB(150, 140, 200)
+    typeLbl.TextSize         = 10
+    typeLbl.Font             = Enum.Font.GothamBold
+    typeLbl.TextXAlignment   = Enum.TextXAlignment.Left
+    typeLbl.ZIndex           = 7
+    typeLbl.Parent           = entry
+
+    -- id label
+    local idLbl = Instance.new("TextLabel")
+    idLbl.Size             = UDim2.new(0, 110, 1, 0)
+    idLbl.Position         = UDim2.new(0, 94, 0, 0)
+    idLbl.BackgroundTransparency = 1
+    idLbl.Text             = idStr
+    idLbl.TextColor3       = Color3.fromRGB(220, 218, 240)
+    idLbl.TextSize         = 12
+    idLbl.Font             = Enum.Font.GothamBold
+    idLbl.TextXAlignment   = Enum.TextXAlignment.Left
+    idLbl.TextTruncate     = Enum.TextTruncate.AtEnd
+    idLbl.ZIndex           = 7
+    idLbl.Parent           = entry
+
+    -- buttons: fire | spam | auto | copy
+    local fireBtn = makeBtn(entry, "fire", 208, 46, 1)
+    local spamBtn = makeBtn(entry, "spam", 258, 46, 2)
+    local autoBtn = makeBtn(entry, "auto", 308, 46, 3)
+    local copyBtn = makeBtn(entry, "copy", 358, 42, 4)
 
     -- fire once
-    EventsTab:CreateButton({
-        Name     = "fire once",
-        Callback = function()
-            fireFakeSignal(signalType, id)
-            notify("fired · " .. idStr)
-        end,
-    })
+    fireBtn.MouseButton1Click:Connect(function()
+        fireFakeSignal(signalType, id)
+        fireBtn.Text      = "sent"
+        fireBtn.TextColor3 = Color3.fromRGB(61, 255, 160)
+        task.wait(1.2)
+        if fireBtn.Parent then
+            fireBtn.Text      = "fire"
+            fireBtn.TextColor3 = Color3.fromRGB(170, 165, 220)
+        end
+    end)
 
-    -- spam toggle
+    -- spam
     local isSpamming = false
     local spamThread = nil
-    local spamBtn
 
     local function stopSpam()
         isSpamming = false
         if spamThread then task.cancel(spamThread) spamThread = nil end
         activeSpam[entryId] = nil
-        if spamBtn then spamBtn:Set("spam · off") end
-        refreshStatus()
+        if spamBtn.Parent then
+            spamBtn.Text      = "spam"
+            spamBtn.TextColor3 = Color3.fromRGB(170, 165, 220)
+            spamBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+        end
     end
 
-    local function startSpam()
-        if isSpamming then return end
-        isSpamming = true
-        if spamBtn then spamBtn:Set("spam · on — tap stop") end
-        spamThread = task.spawn(function()
-            while isSpamming do
-                fireFakeSignal(signalType, id)
-                task.wait(SPAM_INTERVAL)
-            end
-        end)
-        activeSpam[entryId] = stopSpam
-        refreshStatus()
-        notify("spam · " .. idStr)
-    end
+    spamBtn.MouseButton1Click:Connect(function()
+        if isSpamming then
+            stopSpam()
+        else
+            isSpamming = true
+            spamBtn.Text             = "stop"
+            spamBtn.TextColor3       = Color3.fromRGB(255, 100, 100)
+            spamBtn.BackgroundColor3 = Color3.fromRGB(30, 12, 12)
+            spamThread = task.spawn(function()
+                while isSpamming do
+                    fireFakeSignal(signalType, id)
+                    task.wait(SPAM_INTERVAL)
+                end
+            end)
+            activeSpam[entryId] = stopSpam
+        end
+    end)
 
-    spamBtn = EventsTab:CreateButton({
-        Name     = "spam · off",
-        Callback = function()
-            if isSpamming then stopSpam() else startSpam() end
-        end,
-    })
-
-    -- auto toggle
+    -- auto
     local autoActive = false
     local autoThread = nil
-    local autoBtn
 
     local function stopAuto()
         autoActive = false
         if autoThread then task.cancel(autoThread) autoThread = nil end
         activeAuto[entryId] = nil
-        if autoBtn then autoBtn:Set("auto · off") end
-        refreshStatus()
+        if autoBtn.Parent then
+            autoBtn.Text             = "auto"
+            autoBtn.TextColor3       = Color3.fromRGB(170, 165, 220)
+            autoBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+        end
     end
 
-    local function startAuto()
-        if autoActive then return end
-        autoActive = true
-        if autoBtn then autoBtn:Set("auto · on — tap stop") end
-        autoThread = task.spawn(function()
-            while autoActive do
-                fireFakeSignal(signalType, id)
-                task.wait(autoSpeed > 0 and (1 / autoSpeed) or 0.01)
-            end
-        end)
-        activeAuto[entryId] = stopAuto
-        refreshStatus()
-        notify("auto · " .. idStr .. " · " .. autoSpeed .. "/s")
-    end
+    autoBtn.MouseButton1Click:Connect(function()
+        if autoActive then
+            stopAuto()
+        else
+            autoActive = true
+            autoBtn.Text             = "stop"
+            autoBtn.TextColor3       = Color3.fromRGB(255, 200, 0)
+            autoBtn.BackgroundColor3 = Color3.fromRGB(28, 22, 8)
+            autoThread = task.spawn(function()
+                while autoActive do
+                    fireFakeSignal(signalType, id)
+                    task.wait(autoSpeed > 0 and (1 / autoSpeed) or 0.01)
+                end
+            end)
+            activeAuto[entryId] = stopAuto
+        end
+    end)
 
-    autoBtn = EventsTab:CreateButton({
-        Name     = "auto · off",
-        Callback = function()
-            if autoActive then stopAuto() else startAuto() end
-        end,
-    })
+    -- copy
+    copyBtn.MouseButton1Click:Connect(function()
+        pcall(setclipboard, idStr)
+        copyBtn.Text      = "ok!"
+        copyBtn.TextColor3 = Color3.fromRGB(61, 255, 160)
+        task.wait(1.2)
+        if copyBtn.Parent then
+            copyBtn.Text      = "copy"
+            copyBtn.TextColor3 = Color3.fromRGB(170, 165, 220)
+        end
+    end)
 
-    -- copy id
-    EventsTab:CreateButton({
-        Name     = "copy id",
-        Callback = function()
-            pcall(setclipboard, idStr)
-            notify("copied · " .. idStr)
-        end,
+    -- scroll to bottom
+    task.defer(function()
+        if logFrame then
+            logFrame.CanvasPosition = Vector2.new(0, math.huge)
+        end
+    end)
+
+    table.insert(entries, {
+        frame    = entry,
+        stopAuto = stopAuto,
+        stopSpam = stopSpam,
     })
 end
 
 -- ─── SETTINGS TAB ────────────────────────────────────────────────────
-SettingsTab:CreateSection("status")
-refreshStatus()
-
 SettingsTab:CreateSection("controls")
 
 SettingsTab:CreateButton({
@@ -265,12 +423,27 @@ SettingsTab:CreateButton({
 })
 
 SettingsTab:CreateButton({
-    Name     = "reset counter",
+    Name     = "clear all events",
     Callback = function()
         stopAll()
-        eventCount = 0
-        refreshStatus()
-        notify("counter reset", 3)
+        for _, e in ipairs(entries) do
+            if e.frame and e.frame.Parent then e.frame:Destroy() end
+        end
+        entries     = {}
+        eventCount  = 0
+        if logFrame and not logFrame:FindFirstChild("Empty") then
+            emptyLabel = Instance.new("TextLabel")
+            emptyLabel.Name               = "Empty"
+            emptyLabel.Size               = UDim2.new(1, 0, 0, 60)
+            emptyLabel.BackgroundTransparency = 1
+            emptyLabel.Text               = "waiting for events..."
+            emptyLabel.TextColor3         = Color3.fromRGB(80, 76, 110)
+            emptyLabel.TextSize           = 12
+            emptyLabel.Font               = Enum.Font.Gotham
+            emptyLabel.LayoutOrder        = 99999
+            emptyLabel.Parent             = logFrame
+        end
+        notify("cleared")
     end,
 })
 
@@ -287,10 +460,10 @@ SettingsTab:CreateSlider({
 })
 
 SettingsTab:CreateSection("guide")
-SettingsTab:CreateLabel("fire once — single shot, no loop")
-SettingsTab:CreateLabel("spam — every " .. SPAM_INTERVAL .. "s, tap to toggle")
-SettingsTab:CreateLabel("auto — at slider speed, tap to toggle")
-SettingsTab:CreateLabel("slider changes apply live mid-loop")
+SettingsTab:CreateLabel("fire  —  single shot")
+SettingsTab:CreateLabel("spam  —  fires every " .. SPAM_INTERVAL .. "s, tap stop to end")
+SettingsTab:CreateLabel("auto  —  fires at slider speed, tap stop to end")
+SettingsTab:CreateLabel("speed slider applies live to running auto loops")
 
 -- ─── HOOKS ───────────────────────────────────────────────────────────
 MarketplaceService.PromptProductPurchaseFinished:Connect(function(_, id)
