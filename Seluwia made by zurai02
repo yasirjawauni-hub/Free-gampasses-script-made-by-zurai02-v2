@@ -137,12 +137,14 @@ task.spawn(function()
 end)
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size               = UDim2.new(1, 0, 1, 0)
+titleLbl.Size               = UDim2.new(0.55, 0, 1, 0)
+titleLbl.Position           = UDim2.new(0, 0, 0, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Text               = "SELUWIA  ·  event log"
 titleLbl.TextColor3         = Color3.fromRGB(200, 198, 225)
 titleLbl.TextSize           = 12
 titleLbl.Font               = Enum.Font.GothamBold
+titleLbl.TextXAlignment     = Enum.TextXAlignment.Left
 titleLbl.Parent             = titleBar
 
 local countLbl = Instance.new("TextLabel")
@@ -168,7 +170,7 @@ creditLbl.Font               = Enum.Font.Gotham
 creditLbl.TextXAlignment     = Enum.TextXAlignment.Right
 creditLbl.Parent             = panel
 
--- dragging
+-- dragging (connections stored and cleaned up on destroy)
 local dragging, dragStart, startPos = false, nil, nil
 titleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -177,15 +179,21 @@ titleBar.InputBegan:Connect(function(input)
         startPos  = panel.Position
     end
 end)
-UserInputService.InputChanged:Connect(function(input)
+local dragMoveConn = UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local d = input.Position - dragStart
         panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
     end
 end)
-UserInputService.InputEnded:Connect(function(input)
+local dragEndConn = UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
+    end
+end)
+logGui.AncestryChanged:Connect(function()
+    if not logGui.Parent then
+        dragMoveConn:Disconnect()
+        dragEndConn:Disconnect()
     end
 end)
 
@@ -268,7 +276,8 @@ local function addLog(label, id, signalType)
     if e then e:Destroy() end
 
     eventCount += 1
-    countLbl.Text = eventCount .. (eventCount == 1 and " event" or " events")
+    local entryId = eventCount  -- capture now; eventCount changes with future events
+    countLbl.Text = entryId .. (entryId == 1 and " event" or " events")
 
     if #entries >= MAX_ENTRIES then
         local oldest = table.remove(entries, 1)
@@ -342,7 +351,7 @@ local function addLog(label, id, signalType)
     local function stopSpam()
         isSpamming = false
         if spamThread then task.cancel(spamThread) spamThread = nil end
-        activeSpam[eventCount] = nil
+        activeSpam[entryId] = nil
         if spamBtn.Parent then
             spamBtn.Text = "spam" spamBtn.TextColor3 = Color3.fromRGB(160, 155, 210)
             spamBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
@@ -356,7 +365,7 @@ local function addLog(label, id, signalType)
         spamThread = task.spawn(function()
             while isSpamming do fireFakeSignal(signalType, id) task.wait(SPAM_INTERVAL) end
         end)
-        activeSpam[eventCount] = stopSpam
+        activeSpam[entryId] = stopSpam
     end)
 
     -- auto
@@ -365,7 +374,7 @@ local function addLog(label, id, signalType)
     local function stopAuto()
         autoActive = false
         if autoThread then task.cancel(autoThread) autoThread = nil end
-        activeAuto[eventCount] = nil
+        activeAuto[entryId] = nil
         if autoBtn.Parent then
             autoBtn.Text = "auto" autoBtn.TextColor3 = Color3.fromRGB(160, 155, 210)
             autoBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
@@ -382,7 +391,7 @@ local function addLog(label, id, signalType)
                 task.wait(autoSpeed > 0 and (1 / autoSpeed) or 0.01)
             end
         end)
-        activeAuto[eventCount] = stopAuto
+        activeAuto[entryId] = stopAuto
     end)
 
     -- copy
