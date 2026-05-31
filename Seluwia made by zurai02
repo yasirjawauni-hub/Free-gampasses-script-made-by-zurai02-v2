@@ -1,259 +1,62 @@
-local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/SiriusSoftwareLtd/Rayfield/main/source.lua"))()
+-- Load Celestial Interface Suite
+local Celestial = loadstring(game:HttpGet("https://raw.githubusercontent.com/yasirjawauni-hub/Zenith/refs/heads/main/Main%20loader.lua%20by%20zurai02"))()
+
+local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
-local TweenService       = game:GetService("TweenService")
-local UserInputService   = game:GetService("UserInputService")
-local Players            = game:GetService("Players")
-local player             = Players.LocalPlayer
-local playerGui          = player:WaitForChild("PlayerGui")
 
--- ─── EDIT SECTION ────────────────────────────────────────────────────
-local AUTO_SPEED_DEFAULT = 100
-local SPAM_INTERVAL      = 0.1
-local ENTRY_HEIGHT       = 44
-local MAX_ENTRIES        = 50
--- ─────────────────────────────────────────────────────────────────────
+local player = Players.LocalPlayer
 
-local THEME = {
-    TextColor                     = Color3.fromRGB(220, 218, 240),
-    Background                    = Color3.fromRGB(9,   9,   12),
-    Topbar                        = Color3.fromRGB(12,  12,  16),
-    Shadow                        = Color3.fromRGB(4,   4,    6),
-    NotificationBackground        = Color3.fromRGB(12,  12,  16),
-    NotificationActionsBackground = Color3.fromRGB(18,  18,  24),
-    TabBackground                 = Color3.fromRGB(14,  14,  19),
-    TabStroke                     = Color3.fromRGB(28,  26,  40),
-    TabTextColor                  = Color3.fromRGB(130, 125, 175),
-    SelectedTabTextColor          = Color3.fromRGB(61,  255, 160),
-    ElementBackground             = Color3.fromRGB(16,  16,  22),
-    ElementBackgroundHover        = Color3.fromRGB(20,  20,  30),
-    SecondaryElementBackground    = Color3.fromRGB(20,  20,  28),
-    ElementStroke                 = Color3.fromRGB(36,  34,  54),
-    SecondaryElementStroke        = Color3.fromRGB(44,  42,  64),
-    SliderBackground              = Color3.fromRGB(22,  20,  32),
-    SliderProgress                = Color3.fromRGB(61,  255, 160),
-    SliderStroke                  = Color3.fromRGB(44,  42,  64),
-    ToggleBackground              = Color3.fromRGB(22,  20,  32),
-    ToggleEnabled                 = Color3.fromRGB(61,  255, 160),
-    ToggleDisabled                = Color3.fromRGB(50,  46,  72),
-    ToggleEnabledStroke           = Color3.fromRGB(40,  180, 110),
-    ToggleDisabledStroke          = Color3.fromRGB(60,  56,  88),
-    ToggleEnabledInner            = Color3.fromRGB(220, 255, 238),
-    ToggleDisabledInner           = Color3.fromRGB(130, 125, 175),
-    InputBackground               = Color3.fromRGB(14,  14,  19),
-    InputStroke                   = Color3.fromRGB(44,  42,  64),
-    PlaceholderColor              = Color3.fromRGB(80,  76,  110),
+-- Config
+local config = {
+    autoSpeed = 100,
+    spamDelay = 0.1,
 }
 
--- ─── RAYFIELD WINDOW (Settings only) ─────────────────────────────────
-local Window = Rayfield:CreateWindow({
-    Name                = "SELUWIA",
-    LoadingTitle        = "SELUWIA",
-    LoadingSubtitle     = "by zurai02",
-    Icon                = 0,
-    Theme               = THEME,
-    ConfigurationSaving = { Enabled = false },
-    Discord             = { Enabled = false },
-    KeySystem           = false,
+-- State
+local ui = {
+    suppressed = false,
+    eventCount = 0,
+    activeAuto = {},
+    activeSpam = {},
+}
+
+-- Create Celestial window
+local Window = Celestial:CreateWindow({
+    Name = "Marketplace Logger",
+    Theme = "Nebula",
+    Keybind = Enum.KeyCode.RightShift,
+    Size = Vector2.new(760, 520),
+    ConfigurationSaving = {
+        Enabled = true,
+        FileName = "marketplace_config"
+    }
 })
 
-local SettingsTab = Window:CreateTab("Settings", 4483345998)
+-- Tabs
+local EventsTab = Window:CreateTab({ Name = "Events" })
+local SettingsTab = Window:CreateTab({ Name = "Settings" })
 
--- ─── STATE ───────────────────────────────────────────────────────────
-local autoSpeed       = AUTO_SPEED_DEFAULT
-local suppressCounter = 0
-local eventCount      = 0
-local entries         = {}
-local activeAuto      = {}
-local activeSpam      = {}
-
-local function activeCount()
-    local n = 0
-    for _ in pairs(activeAuto) do n += 1 end
-    for _ in pairs(activeSpam) do n += 1 end
-    return n
+-- STOP ALL
+local function stopAll()
+    for _, data in pairs(ui.activeAuto) do if data.loop then task.cancel(data.loop) end end
+    for _, data in pairs(ui.activeSpam) do if data.loop then task.cancel(data.loop) end end
+    table.clear(ui.activeAuto)
+    table.clear(ui.activeSpam)
+    Celestial:Notify({ Title = "Stopped", Content = "All Auto/Spam loops cancelled.", Type = "warn" })
 end
 
-local function notify(content, duration)
-    Rayfield:Notify({
-        Title    = "seluwia",
-        Content  = content,
-        Duration = duration or 2,
-        Image    = 4483362458,
-    })
-end
+EventsTab:CreateButton({
+    Name = "Stop All",
+    Description = "Cancel all Auto/Spam loops",
+    Callback = stopAll
+})
 
--- ─── LOG PANEL (floating, always visible) ────────────────────────────
-local logGui = Instance.new("ScreenGui")
-logGui.Name            = "SeluwiaLog"
-logGui.ResetOnSpawn    = false
-logGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
-logGui.IgnoreGuiInset  = true
-logGui.Parent          = playerGui
-
-local isMobile = UserInputService.TouchEnabled
-
-local panel = Instance.new("Frame")
-panel.Name             = "Panel"
-panel.Size             = isMobile and UDim2.new(0.92, 0, 0.52, 0) or UDim2.new(0, 420, 0, 380)
-panel.Position         = isMobile and UDim2.new(0.04, 0, 0.42, 0) or UDim2.new(0, 16, 0.5, -190)
-panel.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
-panel.BorderSizePixel  = 0
-panel.Parent           = logGui
-
-local pc = Instance.new("UICorner", panel) pc.CornerRadius = UDim.new(0, 12)
-local ps = Instance.new("UIStroke", panel)
-ps.Color = Color3.fromRGB(36, 34, 54) ps.Thickness = 1
-
--- title bar
-local titleBar = Instance.new("Frame")
-titleBar.Size             = UDim2.new(1, 0, 0, 38)
-titleBar.BackgroundColor3 = Color3.fromRGB(12, 12, 17)
-titleBar.BorderSizePixel  = 0
-titleBar.Parent           = panel
-local tc = Instance.new("UICorner", titleBar) tc.CornerRadius = UDim.new(0, 12)
-local tfill = Instance.new("Frame")
-tfill.Size             = UDim2.new(1, 0, 0.5, 0)
-tfill.Position         = UDim2.new(0, 0, 0.5, 0)
-tfill.BackgroundColor3 = Color3.fromRGB(12, 12, 17)
-tfill.BorderSizePixel  = 0
-tfill.Parent           = titleBar
-
--- live dot
-local liveDot = Instance.new("Frame")
-liveDot.Size             = UDim2.new(0, 8, 0, 8)
-liveDot.Position         = UDim2.new(0, 14, 0.5, -4)
-liveDot.BackgroundColor3 = Color3.fromRGB(61, 255, 160)
-liveDot.BorderSizePixel  = 0
-liveDot.Parent           = titleBar
-local ldc = Instance.new("UICorner", liveDot) ldc.CornerRadius = UDim.new(1, 0)
-
-task.spawn(function()
-    while logGui.Parent do
-        TweenService:Create(liveDot, TweenInfo.new(0.9), {BackgroundTransparency = 0.6}):Play()
-        task.wait(0.9)
-        TweenService:Create(liveDot, TweenInfo.new(0.9), {BackgroundTransparency = 0}):Play()
-        task.wait(0.9)
-    end
-end)
-
-local titleLbl = Instance.new("TextLabel")
-titleLbl.Size               = UDim2.new(0.55, 0, 1, 0)
-titleLbl.Position           = UDim2.new(0, 0, 0, 0)
-titleLbl.BackgroundTransparency = 1
-titleLbl.Text               = "SELUWIA  ·  event log"
-titleLbl.TextColor3         = Color3.fromRGB(200, 198, 225)
-titleLbl.TextSize           = 12
-titleLbl.Font               = Enum.Font.GothamBold
-titleLbl.TextXAlignment     = Enum.TextXAlignment.Left
-titleLbl.Parent             = titleBar
-
-local countLbl = Instance.new("TextLabel")
-countLbl.Size               = UDim2.new(0, 120, 1, 0)
-countLbl.Position           = UDim2.new(1, -130, 0, 0)
-countLbl.BackgroundTransparency = 1
-countLbl.Text               = "0 events"
-countLbl.TextColor3         = Color3.fromRGB(80, 76, 110)
-countLbl.TextSize           = 11
-countLbl.Font               = Enum.Font.Gotham
-countLbl.TextXAlignment     = Enum.TextXAlignment.Right
-countLbl.Parent             = titleBar
-
--- credits
-local creditLbl = Instance.new("TextLabel")
-creditLbl.Size               = UDim2.new(0, 80, 1, 0)
-creditLbl.Position           = UDim2.new(1, -88, 0, 0)
-creditLbl.BackgroundTransparency = 1
-creditLbl.Text               = "by zurai02"
-creditLbl.TextColor3         = Color3.fromRGB(55, 51, 82)
-creditLbl.TextSize           = 10
-creditLbl.Font               = Enum.Font.Gotham
-creditLbl.TextXAlignment     = Enum.TextXAlignment.Right
-creditLbl.Parent             = panel
-
--- dragging (connections stored and cleaned up on destroy)
-local dragging, dragStart, startPos = false, nil, nil
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging  = true
-        dragStart = input.Position
-        startPos  = panel.Position
-    end
-end)
-local dragMoveConn = UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local d = input.Position - dragStart
-        panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-    end
-end)
-local dragEndConn = UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-    end
-end)
-logGui.AncestryChanged:Connect(function()
-    if not logGui.Parent then
-        dragMoveConn:Disconnect()
-        dragEndConn:Disconnect()
-    end
-end)
-
--- scroll area
-local logScroll = Instance.new("ScrollingFrame")
-logScroll.Size                = UDim2.new(1, -10, 1, -48)
-logScroll.Position            = UDim2.new(0, 5, 0, 42)
-logScroll.BackgroundTransparency = 1
-logScroll.BorderSizePixel     = 0
-logScroll.ScrollBarThickness  = 3
-logScroll.ScrollBarImageColor3 = Color3.fromRGB(61, 255, 160)
-logScroll.CanvasSize          = UDim2.new(0, 0, 0, 0)
-logScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-logScroll.Parent              = panel
-
-local layout = Instance.new("UIListLayout", logScroll)
-layout.SortOrder         = Enum.SortOrder.LayoutOrder
-layout.Padding           = UDim.new(0, 4)
-layout.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local pad = Instance.new("UIPadding", logScroll)
-pad.PaddingTop    = UDim.new(0, 4)
-pad.PaddingBottom = UDim.new(0, 4)
-pad.PaddingLeft   = UDim.new(0, 2)
-pad.PaddingRight  = UDim.new(0, 2)
-
-local emptyLbl = Instance.new("TextLabel")
-emptyLbl.Name               = "Empty"
-emptyLbl.Size               = UDim2.new(1, 0, 0, 60)
-emptyLbl.BackgroundTransparency = 1
-emptyLbl.Text               = "waiting for events..."
-emptyLbl.TextColor3         = Color3.fromRGB(70, 66, 100)
-emptyLbl.TextSize           = 12
-emptyLbl.Font               = Enum.Font.Gotham
-emptyLbl.LayoutOrder        = 99999
-emptyLbl.Parent             = logScroll
-
--- ─── BUTTON HELPER ───────────────────────────────────────────────────
-local function makeBtn(parent, text, x, w)
-    local b = Instance.new("TextButton")
-    b.Size             = UDim2.new(0, w, 0, 26)
-    b.Position         = UDim2.new(0, x, 0.5, -13)
-    b.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-    b.Text             = text
-    b.TextColor3       = Color3.fromRGB(160, 155, 210)
-    b.TextSize         = 10
-    b.Font             = Enum.Font.GothamBold
-    b.BorderSizePixel  = 0
-    b.ZIndex           = 3
-    b.Parent           = parent
-    local c = Instance.new("UICorner", b) c.CornerRadius = UDim.new(0, 6)
-    local s = Instance.new("UIStroke", b) s.Color = Color3.fromRGB(44, 42, 64) s.Thickness = 1
-    b.MouseEnter:Connect(function() b.BackgroundColor3 = Color3.fromRGB(24, 22, 36) end)
-    b.MouseLeave:Connect(function() b.BackgroundColor3 = Color3.fromRGB(18, 18, 26) end)
-    return b
-end
-
--- ─── SIGNAL HELPER ───────────────────────────────────────────────────
+-- SIGNAL FIRING
 local function fireFakeSignal(signalType, id)
-    suppressCounter += 1
+    if ui.suppressed then return end
+    ui.suppressed = true
+    task.defer(function() ui.suppressed = false end)
+
     pcall(function()
         if signalType == "Product" then
             MarketplaceService:SignalPromptProductPurchaseFinished(player.UserId, id, true)
@@ -265,204 +68,99 @@ local function fireFakeSignal(signalType, id)
             MarketplaceService:SignalPromptPurchaseFinished(player.UserId, id, true)
         end
     end)
-    suppressCounter -= 1
 end
 
--- ─── ADD LOG ─────────────────────────────────────────────────────────
+-- ADD LOG ENTRY
 local function addLog(label, id, signalType)
-    if suppressCounter > 0 then return end
+    ui.eventCount += 1
+    local section = EventsTab:CreateSection(label .. " | ID: " .. tostring(id))
 
-    local e = logScroll:FindFirstChild("Empty")
-    if e then e:Destroy() end
-
-    eventCount += 1
-    local entryId = eventCount  -- capture now; eventCount changes with future events
-    countLbl.Text = entryId .. (entryId == 1 and " event" or " events")
-
-    if #entries >= MAX_ENTRIES then
-        local oldest = table.remove(entries, 1)
-        if oldest.stopAuto then oldest.stopAuto() end
-        if oldest.stopSpam then oldest.stopSpam() end
-        if oldest.frame and oldest.frame.Parent then oldest.frame:Destroy() end
-    end
-
-    local entry = Instance.new("Frame")
-    entry.Size             = UDim2.new(1, 0, 0, ENTRY_HEIGHT)
-    entry.BackgroundColor3 = Color3.fromRGB(15, 15, 21)
-    entry.BorderSizePixel  = 0
-    entry.LayoutOrder      = eventCount
-    entry.BackgroundTransparency = 1
-    entry.Parent           = logScroll
-    local ec = Instance.new("UICorner", entry) ec.CornerRadius = UDim.new(0, 8)
-    local es = Instance.new("UIStroke", entry) es.Color = Color3.fromRGB(36, 34, 54) es.Thickness = 1
-    TweenService:Create(entry, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
-
-    -- dot
-    local dot = Instance.new("Frame")
-    dot.Size = UDim2.new(0, 7, 0, 7)
-    dot.Position = UDim2.new(0, 10, 0.5, -3)
-    dot.BackgroundColor3 = Color3.fromRGB(61, 255, 160)
-    dot.BorderSizePixel = 0
-    dot.Parent = entry
-    local dcc = Instance.new("UICorner", dot) dcc.CornerRadius = UDim.new(1, 0)
-
-    -- type
-    local typeLbl = Instance.new("TextLabel")
-    typeLbl.Size = UDim2.new(0, 62, 1, 0)
-    typeLbl.Position = UDim2.new(0, 22, 0, 0)
-    typeLbl.BackgroundTransparency = 1
-    typeLbl.Text = label:upper()
-    typeLbl.TextColor3 = Color3.fromRGB(140, 130, 190)
-    typeLbl.TextSize = 10
-    typeLbl.Font = Enum.Font.GothamBold
-    typeLbl.TextXAlignment = Enum.TextXAlignment.Left
-    typeLbl.Parent = entry
-
-    -- id
-    local idLbl = Instance.new("TextLabel")
-    idLbl.Size = UDim2.new(0, 90, 1, 0)
-    idLbl.Position = UDim2.new(0, 86, 0, 0)
-    idLbl.BackgroundTransparency = 1
-    idLbl.Text = tostring(id)
-    idLbl.TextColor3 = Color3.fromRGB(215, 213, 238)
-    idLbl.TextSize = 12
-    idLbl.Font = Enum.Font.GothamBold
-    idLbl.TextXAlignment = Enum.TextXAlignment.Left
-    idLbl.TextTruncate = Enum.TextTruncate.AtEnd
-    idLbl.Parent = entry
-
-    local idStr = tostring(id)
-    local fireBtn = makeBtn(entry, "fire", 180, 40)
-    local spamBtn = makeBtn(entry, "spam", 224, 40)
-    local autoBtn = makeBtn(entry, "auto", 268, 40)
-    local copyBtn = makeBtn(entry, "copy", 312, 40)
-
-    -- fire once
-    fireBtn.MouseButton1Click:Connect(function()
-        fireFakeSignal(signalType, id)
-        fireBtn.Text = "sent!" fireBtn.TextColor3 = Color3.fromRGB(61, 255, 160)
-        task.wait(1.2)
-        if fireBtn.Parent then fireBtn.Text = "fire" fireBtn.TextColor3 = Color3.fromRGB(160, 155, 210) end
-    end)
-
-    -- spam
-    local isSpamming = false
-    local spamThread = nil
-    local function stopSpam()
-        isSpamming = false
-        if spamThread then task.cancel(spamThread) spamThread = nil end
-        activeSpam[entryId] = nil
-        if spamBtn.Parent then
-            spamBtn.Text = "spam" spamBtn.TextColor3 = Color3.fromRGB(160, 155, 210)
-            spamBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-        end
-    end
-    spamBtn.MouseButton1Click:Connect(function()
-        if isSpamming then stopSpam() return end
-        isSpamming = true
-        spamBtn.Text = "stop" spamBtn.TextColor3 = Color3.fromRGB(255, 90, 90)
-        spamBtn.BackgroundColor3 = Color3.fromRGB(28, 10, 10)
-        spamThread = task.spawn(function()
-            while isSpamming do fireFakeSignal(signalType, id) task.wait(SPAM_INTERVAL) end
-        end)
-        activeSpam[entryId] = stopSpam
-    end)
-
-    -- auto
-    local autoActive = false
-    local autoThread = nil
-    local function stopAuto()
-        autoActive = false
-        if autoThread then task.cancel(autoThread) autoThread = nil end
-        activeAuto[entryId] = nil
-        if autoBtn.Parent then
-            autoBtn.Text = "auto" autoBtn.TextColor3 = Color3.fromRGB(160, 155, 210)
-            autoBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
-        end
-    end
-    autoBtn.MouseButton1Click:Connect(function()
-        if autoActive then stopAuto() return end
-        autoActive = true
-        autoBtn.Text = "stop" autoBtn.TextColor3 = Color3.fromRGB(255, 200, 0)
-        autoBtn.BackgroundColor3 = Color3.fromRGB(28, 22, 6)
-        autoThread = task.spawn(function()
-            while autoActive do
-                fireFakeSignal(signalType, id)
-                task.wait(autoSpeed > 0 and (1 / autoSpeed) or 0.01)
+    -- Auto button
+    EventsTab:CreateButton({
+        Name = "Auto",
+        Description = "Auto-fire signal",
+        Callback = function(btn)
+            if ui.activeAuto[btn] then
+                task.cancel(ui.activeAuto[btn].loop)
+                ui.activeAuto[btn] = nil
+                Celestial:Notify({ Title = "Auto stopped", Type = "info" })
+            else
+                local loop = task.spawn(function()
+                    local delay = config.autoSpeed > 0 and (1 / config.autoSpeed) or 0.01
+                    while btn and ui.activeAuto[btn] do
+                        fireFakeSignal(signalType, id)
+                        task.wait(delay)
+                    end
+                end)
+                ui.activeAuto[btn] = { loop = loop }
+                Celestial:Notify({ Title = "Auto started", Type = "success" })
             end
-        end)
-        activeAuto[entryId] = stopAuto
-    end)
+        end
+    })
 
-    -- copy
-    copyBtn.MouseButton1Click:Connect(function()
-        pcall(setclipboard, idStr)
-        copyBtn.Text = "ok!" copyBtn.TextColor3 = Color3.fromRGB(61, 255, 160)
-        task.wait(1.2)
-        if copyBtn.Parent then copyBtn.Text = "copy" copyBtn.TextColor3 = Color3.fromRGB(160, 155, 210) end
-    end)
+    -- Copy button
+    EventsTab:CreateButton({
+        Name = "Copy ID",
+        Description = "Copy to clipboard",
+        Callback = function()
+            pcall(setclipboard, tostring(id))
+            Celestial:Notify({ Title = "Copied!", Content = tostring(id), Type = "success" })
+        end
+    })
 
-    task.defer(function()
-        logScroll.CanvasPosition = Vector2.new(0, math.huge)
-    end)
-
-    table.insert(entries, {frame = entry, stopAuto = stopAuto, stopSpam = stopSpam})
+    -- Run button (spam)
+    EventsTab:CreateButton({
+        Name = "Run Spam",
+        Description = "Spam signal",
+        Callback = function(btn)
+            if ui.activeSpam[btn] then
+                task.cancel(ui.activeSpam[btn].loop)
+                ui.activeSpam[btn] = nil
+                Celestial:Notify({ Title = "Spam stopped", Type = "info" })
+            else
+                local loop = task.spawn(function()
+                    while btn and ui.activeSpam[btn] do
+                        fireFakeSignal(signalType, id)
+                        task.wait(config.spamDelay)
+                    end
+                end)
+                ui.activeSpam[btn] = { loop = loop }
+                Celestial:Notify({ Title = "Spam started", Type = "success" })
+            end
+        end
+    })
 end
 
--- ─── STOP ALL ────────────────────────────────────────────────────────
-local function stopAll()
-    local n = activeCount()
-    if n == 0 then notify("no loops running") return end
-    local ac = {} for k,v in pairs(activeAuto) do ac[k]=v end for _,fn in pairs(ac) do fn() end
-    local sc = {} for k,v in pairs(activeSpam) do sc[k]=v end for _,fn in pairs(sc) do fn() end
-    notify(n .. " loop" .. (n==1 and "" or "s") .. " stopped")
-end
+-- SETTINGS TAB
+SettingsTab:CreateSection("Configuration")
 
--- ─── SETTINGS TAB ────────────────────────────────────────────────────
-SettingsTab:CreateSection("controls")
-SettingsTab:CreateButton({ Name = "stop all loops", Callback = stopAll })
 SettingsTab:CreateButton({
-    Name = "clear events",
+    Name = "Set Auto Speed",
+    Description = "Default: 100 signals/sec",
     Callback = function()
-        stopAll()
-        for _, e in ipairs(entries) do
-            if e.frame and e.frame.Parent then e.frame:Destroy() end
-        end
-        entries = {} eventCount = 0
-        countLbl.Text = "0 events"
-        if not logScroll:FindFirstChild("Empty") then
-            local el = Instance.new("TextLabel")
-            el.Name = "Empty" el.Size = UDim2.new(1,0,0,60)
-            el.BackgroundTransparency = 1 el.Text = "waiting for events..."
-            el.TextColor3 = Color3.fromRGB(70,66,100) el.TextSize = 12
-            el.Font = Enum.Font.Gotham el.LayoutOrder = 99999 el.Parent = logScroll
-        end
-        notify("cleared")
-    end,
+        config.autoSpeed = 200
+        Celestial:Notify({ Title = "Auto speed updated", Content = tostring(config.autoSpeed), Type = "success" })
+    end
 })
 
-SettingsTab:CreateSection("auto speed")
-SettingsTab:CreateSlider({
-    Name = "signals per second", Range = {1, 500}, Increment = 1,
-    Suffix = "/s", CurrentValue = AUTO_SPEED_DEFAULT, Flag = "AutoSpeed",
-    Callback = function(v) autoSpeed = v end,
+SettingsTab:CreateButton({
+    Name = "Set Spam Delay",
+    Description = "Default: 0.1s",
+    Callback = function()
+        config.spamDelay = 0.05
+        Celestial:Notify({ Title = "Spam delay updated", Content = tostring(config.spamDelay), Type = "success" })
+    end
 })
 
-SettingsTab:CreateSection("guide")
-SettingsTab:CreateLabel("fire — single shot")
-SettingsTab:CreateLabel("spam — fires every " .. SPAM_INTERVAL .. "s, tap to stop")
-SettingsTab:CreateLabel("auto — fires at slider speed, tap to stop")
+-- Example injection of events
+task.delay(2, function()
+    addLog("Product", 123456, "Product")
+    addLog("Gamepass", 78910, "Gamepass")
+end)
 
--- ─── HOOKS ───────────────────────────────────────────────────────────
-MarketplaceService.PromptProductPurchaseFinished:Connect(function(_, id)
-    addLog("product", id, "Product")
-end)
-MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(_, id)
-    addLog("gamepass", id, "Gamepass")
-end)
-MarketplaceService.PromptBulkPurchaseFinished:Connect(function(_, id)
-    addLog("bulk", id, "Bulk")
-end)
-MarketplaceService.PromptPurchaseFinished:Connect(function(_, id)
-    addLog("purchase", id, "Purchase")
-end)
+Celestial:Notify({
+    Title = "UI Loaded",
+    Content = "Celestial Interface Suite is active.",
+    Type = "success",
+    Duration = 5
+})
